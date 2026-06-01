@@ -1,0 +1,18 @@
+Copyright (c) 2026 The Authors.
+
+This work (code and accompanying materials) is licensed under the
+Creative Commons Attribution-NonCommercial 4.0 International License
+(CC BY-NC 4.0).
+
+You are free to share and adapt the material for non-commercial purposes,
+provided you give appropriate credit. Commercial use is not permitted without
+separate written permission from the authors.
+
+SPDX-License-Identifier: CC-BY-NC-4.0
+
+Full legal text: https://creativecommons.org/licenses/by-nc/4.0/legalcode
+Summary:        https://creativecommons.org/licenses/by-nc/4.0/
+
+NOTE: This repository builds on third-party foundation models (e.g., RETFound,
+released under CC BY-NC 4.0) and other dependencies that carry their own licenses;
+those terms continue to apply to the respective components.

@@ -1,0 +1,25 @@
+# data, weights, features, outputs — never commit
+*.npz
+*.bin
+*.parquet
+*.pkl
+*.pth
+*.pt
+*.ckpt
+*.csv
+*.log
+runs/
+mvt_runs/
+multivisit_runs/
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+env/
+
+# os/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
