@@ -3,12 +3,6 @@
 Reference code accompanying the manuscript
 *"Longitudinal retinal imaging predicts cardiovascular risk that no single image fully captures."*
 
-This repository contains only the **model / training code for the compared methods** and
-the **evaluation (test) code**. Data-construction, cohort-building, feature-extraction,
-ablation and analysis scripts are intentionally **not** included, so the repository carries
-no dataset field definitions, no image paths, and no machine-specific configuration. The
-models operate on pre-extracted, cached image features (one frozen 1024-d CLS vector per
-image); producing those features and the per-patient sample tables is out of scope here.
 
 ```
 training/
