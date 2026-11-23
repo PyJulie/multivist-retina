@@ -23,3 +23,6 @@ env/
 Thumbs.db
 .idea/
 .vscode/
+
+# manifests and outputs
+*.jsonl

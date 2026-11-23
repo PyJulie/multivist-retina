@@ -1,57 +1,86 @@
-# Multi-visit transformer — training and evaluation code
+# Multi-visit transformer (MVT)
 
-Reference code accompanying the manuscript
-*"Longitudinal retinal imaging predicts cardiovascular risk that no single image fully captures."*
+Code accompanying the manuscript *"Longitudinal oculomics improves cardiovascular risk and
+mortality prediction"*.
 
+The repository contains the model and its training and test code. The study data (AlzEye and
+iKang) cannot be shared, so the code reads a generic manifest of image paths, laterality and
+acquisition dates.
 
 ```
-training/
-  train_multivisit.py             # single-visit (MVT-1) vs multi-visit (MVT-K) transformer
-  train_multivisit_multitask.py   # MVT-Joint: one shared visit aggregator, multiple CV-endpoint heads
-  train_multivisit_survival.py    # MVT-Surv: discrete-time survival variant
-evaluation/
-  significance.py                 # seed-ensembled DeLong test + paired bootstrap 95% CI (M2 vs M1)
-  collect_results.py              # aggregate per-run test summaries into AUROC / gain tables
+mvt/model.py     MVT: RETFound encoder, interaction modules C1-C3, patient-level readout
+mvt/encoder.py   RETFound-DINOv2 ViT-Large encoder (224 x 224 input)
+mvt/data.py      patient histories and visit selection for MVT-1 and MVT-K
+mvt/engine.py    optimiser, learning-rate schedule, training loop and prediction
+train.py         train MVT-1 or MVT-K
+test.py          predict a test set and report AUROC and average precision
 ```
 
 ## Model
 
-Each image is one input token: a frozen RETFound ViT-Large CLS feature (1024-d) is linearly
-projected to 256-d, with a learned laterality (L/R) embedding and a sinusoidal
-image-to-index time-delta embedding added. A learned CLS token is prepended and the
-sequence is processed by a 2-layer Transformer encoder (4 heads, 4x feed-forward, dropout
-0.1, norm-first); the CLS output gives one prediction per patient. Training: AdamW
-(lr 1e-4, weight decay 1e-4), cosine schedule, batch size 128, gradient clip 1.0,
-BCE-with-logits with positive-class weighting, number of visit-dates sampled uniformly in
-[1, 8] per patient, early stopping on validation AUROC. The multi-task variant shares the
-visit aggregator across endpoints; the survival variant replaces the head with a 20-bin
-(three-month) discrete-time sigmoid-hazard head.
+- **Encoder.** RETFound-DINOv2 ViT-Large (24 blocks) at 224 x 224 pixels. Positional embeddings
+  of a checkpoint trained at another resolution are resampled by bicubic interpolation.
+- **Interaction modules.** C1, C2 and C3 sit after encoder blocks 18, 21 and 24 and have separate
+  parameters. Each keeps the classification token, average-pools the patch tokens to a 4 x 4
+  grid (17 tokens per image), projects them to 768 dimensions and adds positional, laterality
+  (right, left or unknown) and time embeddings. The time embedding encodes the interval to the
+  index date with sine and cosine at 1, 7, 30, 90, 180, 365, 730 and 1,825 days, followed by a
+  two-layer projection.
+- **Attention inside each module.** Within-image spatial attention, then same-eye cross-visit
+  attention, then same-visit bilateral attention. Cross-image attention uses only images with
+  known laterality and adds a learned per-head bias of the signed interval between the two
+  images. The update returns to the encoder tokens through a linear projection, bilinear
+  upsampling to the patch grid and a learnable residual scale initialised at 0.01.
+- **Patient-level readout.** Eight learned queries, two cross-attention layers, mean over the
+  queries, layer normalisation, dropout and a linear layer giving one logit per patient.
+- All attention layers use pre-normalisation, 12 heads, a feed-forward expansion of 4 and
+  dropout of 0.1.
 
-## Input contract
+## Training settings
 
-The training scripts read per-split sample tables (one row per patient) with columns:
-`patient_id`, `label`, `input_paths` (image identifiers for that patient's visits),
-`input_dt_days` (image-to-index time deltas), `input_lat` (laterality), and a feature
-store keyed by image identifier. Building these tables from a specific cohort is
-deliberately left to the user. Evaluation reads per-run `test_preds.csv` (`pid, y, prob`)
-and `summary.json`.
+| Setting | Value |
+|---|---|
+| Visits | MVT-1: all images from the most recent visit date. MVT-K: up to the K most recent visit dates (K = 8 in AlzEye, 4 in iKang). During training the number of visit dates is sampled uniformly between one and the number available. |
+| Encoder | frozen in epoch 1, fine-tuned from epoch 2 |
+| Optimiser | AdamW; learning rate 1e-4 for new modules and 3e-6 for the encoder, with layer-wise decay 0.9; weight decay 0.01 |
+| Schedule | one-epoch linear warm-up, cosine decay, at most 8 epochs |
+| Early stopping | after 3 epochs without improvement in validation AUROC; the checkpoint with the highest validation AUROC is kept |
+| Batch | 16 patients (2 per step, 8 accumulation steps), mixed precision, gradient clipping at 1.0 |
+| Loss | binary cross-entropy, positive class weighted by the negative-to-positive ratio of the training set |
+| Seed | 1 |
 
-## Modes (in `train_multivisit.py`)
+The values are set in `CONFIG` in `mvt/engine.py`.
 
-`M1` single-visit (K=1) · `M2` multi-visit · plus control modes used in the paper's
-ablations. Run scripts for the ablations / K-sweep are not included.
+## Input format
 
-## Environment
+One JSON Lines manifest per split, one patient per line:
 
-See `requirements.txt`. Paths are passed as environment variables / CLI arguments
-(`${RUNS_DIR}`, `${SAMPLES_DIR}`, `${CACHE_DIR}`, ...); no paths are hard-coded.
+```json
+{"pid": "p001", "label": 1,
+ "images": [{"path": "p001/2019-05-02_R.jpg", "eye": "R", "date": "2019-05-02"},
+            {"path": "p001/2019-05-02_L.jpg", "eye": "L", "date": "2019-05-02"},
+            {"path": "p001/2017-03-14_R.jpg", "eye": "R", "date": "2017-03-14"}]}
+```
 
-## Data availability
+`eye` is `R`, `L` or `U` (unknown). The index date is the most recent visit date, and image paths
+are relative to `--image-root`.
 
-The study datasets are not publicly redistributable and are governed by their data
-controllers. Foundation-model weights are available from their original providers.
+## Usage
 
-## License
+```bash
+pip install -r requirements.txt
 
-Released for **non-commercial research use** under CC BY-NC 4.0, matching the licensing of
-the RETFound foundation models this work builds on. See `LICENSE`.
+python train.py --train train.jsonl --val val.jsonl --weights retfound_dinov2.pth \
+    --mode mvtk --max-visits 8 --out runs/mvtk
+
+python test.py --test test.jsonl --checkpoint runs/mvtk/best.pt \
+    --mode mvtk --max-visits 8 --out runs/mvtk/test_predictions.csv
+```
+
+Use `--mode mvt1` for the single-visit model. The RETFound-DINOv2 weights are released by the
+RETFound authors and are not included here. Training needs a GPU; the code was run on a single
+48 GB GPU.
+
+## Licence
+
+See `LICENSE`.
